@@ -9,5 +9,6 @@ app = FastAPI(
 @app.get("/")
 def root():
     return {
-        "message": "Welcome to ModelVerse API 🚀"
+        "message": "Welcome to ModelVerse API 🚀",
+        "status": "running"
     }

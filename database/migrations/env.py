@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 from app.config.settings import settings
 from app.models.base import Base
 # Import all models so metadata is populated
+from app.models.dataset import Dataset
 from app.models.project import Project
 from app.models.user import User
 

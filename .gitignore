@@ -23,6 +23,7 @@ pnpm-debug.log*
 .pytest_cache/
 .coverage
 htmlcov/
+*.db
 
 # IDE
 .vscode/
@@ -38,6 +39,9 @@ mlruns/
 *.joblib
 *.h5
 *.onnx
+
+# User data / uploaded datasets
+data/
 
 # Logs
 *.log

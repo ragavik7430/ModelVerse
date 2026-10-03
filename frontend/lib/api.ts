@@ -28,6 +28,44 @@ export type Project = {
   updated_at: string;
 };
 
+export type DatasetSummary = {
+  row_count: number;
+  column_count: number;
+  columns: string[];
+  missing_values: Record<string, number>;
+  missing_percentages: Record<string, number>;
+  duplicate_rows: number;
+  duplicate_percentage: number;
+  unique_value_counts: Record<string, number>;
+  numeric_columns: string[];
+  categorical_columns: string[];
+  inferred_types: Record<string, string>;
+  quality_score: number;
+  quality_status: string;
+  findings: Array<{
+    type: string;
+    severity: "info" | "warning" | "error";
+    column?: string | null;
+    message: string;
+    value: number | string | null;
+  }>;
+};
+
+export type Dataset = {
+  id: number;
+  project_id: number;
+  filename: string;
+  original_filename: string;
+  file_size: number;
+  file_type: string;
+  row_count: number;
+  column_count: number;
+  status: string;
+  uploaded_at: string;
+  updated_at: string;
+  summary?: DatasetSummary;
+};
+
 const STORAGE_KEY = "modelverse_token";
 const HEALTH_ENDPOINT = "/system/health";
 
@@ -170,6 +208,56 @@ export async function updateProject(projectId: number, payload: Partial<Project>
 
 export async function deleteProject(projectId: number): Promise<{ deleted: boolean; project_id: number }> {
   return apiRequest<{ deleted: boolean; project_id: number }>(`/projects/${projectId}`, {
+    method: "DELETE",
+  }, true);
+}
+
+export async function getProjectDatasets(projectId: number): Promise<Dataset[]> {
+  return apiRequest<Dataset[]>(`/projects/${projectId}/datasets`, { method: "GET" }, true);
+}
+
+export async function getDataset(datasetId: number): Promise<Dataset> {
+  return apiRequest<Dataset>(`/datasets/${datasetId}`, { method: "GET" }, true);
+}
+
+export async function uploadDataset(projectId: number, file: File): Promise<Dataset> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const token = getStoredAuthToken();
+  const headers = new Headers();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/datasets`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+
+  if (response.status === 401 && typeof window !== "undefined") {
+    clearStoredAuthToken();
+  }
+
+  if (!response.ok) {
+    let message = "Dataset upload failed.";
+    try {
+      const payload = await response.json();
+      if (payload && typeof payload.detail === "string") {
+        message = payload.detail;
+      }
+    } catch {
+      message = `Dataset upload failed with status ${response.status}.`;
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<Dataset>;
+}
+
+export async function deleteDataset(datasetId: number): Promise<{ deleted: boolean; dataset_id: number }> {
+  return apiRequest<{ deleted: boolean; dataset_id: number }>(`/datasets/${datasetId}`, {
     method: "DELETE",
   }, true);
 }

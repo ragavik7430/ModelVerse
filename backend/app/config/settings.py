@@ -12,6 +12,11 @@ class Settings:
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+    MAX_UPLOAD_SIZE_BYTES: int = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(25 * 1024 * 1024)))
+    DATASET_STORAGE_PATH: str = os.getenv(
+        "DATASET_STORAGE_PATH",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "datasets"),
+    )
 
     cors_env = os.getenv("BACKEND_CORS_ORIGINS", '["http://localhost:3000"]')
     try:

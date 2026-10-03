@@ -2,17 +2,43 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 
-import { getProject, getStoredAuthToken, logout, updateProject, type Project } from "@/lib/api";
+import {
+  deleteDataset,
+  getProject,
+  getProjectDatasets,
+  getStoredAuthToken,
+  logout,
+  updateProject,
+  uploadDataset,
+  type Dataset,
+  type Project,
+} from "@/lib/api";
+
+const formatFileSize = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+};
 
 export default function ProjectDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const projectId = Number(params.id);
   const [project, setProject] = useState<Project | null>(null);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savingProject, setSavingProject] = useState(false);
+  const [uploadingDataset, setUploadingDataset] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState("");
+  const [projectForm, setProjectForm] = useState({
+    name: "",
+    problem_statement: "",
+    objective: "",
+    mode: "engineering" as "engineering" | "learning",
+  });
 
   useEffect(() => {
     const token = getStoredAuthToken();
@@ -23,10 +49,20 @@ export default function ProjectDetailPage() {
 
     const load = async () => {
       try {
-        const result = await getProject(projectId);
-        setProject(result);
+        const [projectResult, datasetList] = await Promise.all([
+          getProject(projectId),
+          getProjectDatasets(projectId),
+        ]);
+        setProject(projectResult);
+        setDatasets(datasetList);
+        setProjectForm({
+          name: projectResult.name,
+          problem_statement: projectResult.problem_statement,
+          objective: projectResult.objective,
+          mode: projectResult.mode,
+        });
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Unable to load project.");
+        setError(err instanceof Error ? err.message : "Unable to load project workspace.");
       } finally {
         setLoading(false);
       }
@@ -40,8 +76,53 @@ export default function ProjectDetailPage() {
     try {
       const updated = await updateProject(project.id, { mode });
       setProject(updated);
+      setProjectForm((current) => ({ ...current, mode }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to update the workspace mode.");
+    }
+  };
+
+  const handleProjectSave = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!project) return;
+
+    try {
+      setSavingProject(true);
+      const updated = await updateProject(project.id, projectForm);
+      setProject(updated);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save the project problem definition.");
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile || !project) return;
+
+    try {
+      setUploadingDataset(true);
+      setError("");
+      const uploaded = await uploadDataset(project.id, selectedFile);
+      setDatasets((current) => [uploaded, ...current]);
+      setSelectedFile(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to upload the dataset.");
+    } finally {
+      setUploadingDataset(false);
+    }
+  };
+
+  const handleDeleteDataset = async (datasetId: number) => {
+    const confirmed = window.confirm("Delete this dataset from the project workspace?");
+    if (!confirmed) return;
+
+    try {
+      await deleteDataset(datasetId);
+      setDatasets((current) => current.filter((dataset) => dataset.id !== datasetId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete the dataset.");
     }
   };
 
@@ -141,36 +222,102 @@ export default function ProjectDetailPage() {
           {error ? <div className="error-box">{error}</div> : null}
 
           <div className="detail-grid">
-            <section className="project-detail-card">
-              <h2>Problem Statement</h2>
-              <p>{project.problem_statement}</p>
-            </section>
+            <section className="project-detail-card wide-card">
+              <div className="section-header-row">
+                <h2>Problem Definition</h2>
+              </div>
 
-            <section className="project-detail-card">
-              <h2>Objective</h2>
-              <p>{project.objective}</p>
+              <form id="project-problem-form" className="workspace-form" onSubmit={handleProjectSave}>
+                <label className="field">
+                  <span>Project Name</span>
+                  <input
+                    value={projectForm.name}
+                    onChange={(event) => setProjectForm((current) => ({ ...current, name: event.target.value }))}
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Problem Statement</span>
+                  <textarea
+                    rows={5}
+                    value={projectForm.problem_statement}
+                    onChange={(event) => setProjectForm((current) => ({ ...current, problem_statement: event.target.value }))}
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Objective</span>
+                  <textarea
+                    rows={4}
+                    value={projectForm.objective}
+                    onChange={(event) => setProjectForm((current) => ({ ...current, objective: event.target.value }))}
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Workspace Mode</span>
+                  <select
+                    value={projectForm.mode}
+                    onChange={(event) => setProjectForm((current) => ({ ...current, mode: event.target.value as "engineering" | "learning" }))}
+                  >
+                    <option value="engineering">Engineering</option>
+                    <option value="learning">Learning</option>
+                  </select>
+                </label>
+
+                <button type="submit" className="button-primary" disabled={savingProject}>
+                  {savingProject ? "Saving changes..." : "Save problem details"}
+                </button>
+              </form>
             </section>
 
             <section className="project-detail-card wide-card">
-              <h2>Mode</h2>
-              <p>{project.mode === "engineering" ? "Engineering Mode" : "Learning Mode"}</p>
-              {project.mode === "engineering" ? (
-                <div className="mode-copy">
-                  <p>Technical language and system configuration are the focus here. This workspace will support technical requirements, lifecycle planning, and engineering-oriented project tracking.</p>
-                  <ul>
-                    <li>Problem and dataset inputs</li>
-                    <li>Engineering execution plan</li>
-                    <li>Lifecycle readiness and agent handoffs</li>
-                  </ul>
+              <div className="section-header-row">
+                <h2>Dataset Intelligence</h2>
+              </div>
+
+              <div className="dataset-upload-row">
+                <input
+                  type="file"
+                  accept=".csv,text/csv,application/csv"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setSelectedFile(event.target.files?.[0] ?? null)}
+                />
+                <button type="button" className="button-primary small-button" onClick={() => void handleUpload()} disabled={!selectedFile || uploadingDataset}>
+                  {uploadingDataset ? "Uploading..." : "Upload Dataset"}
+                </button>
+              </div>
+
+              {datasets.length === 0 ? (
+                <div className="empty-state compact">
+                  <h3>No datasets uploaded yet</h3>
+                  <p>Upload a real CSV and ModelVerse will analyze quality, completeness, and readiness.</p>
                 </div>
               ) : (
-                <div className="mode-copy">
-                  <p>Learning Mode translates the process into plain-language guidance so you can understand why each stage matters and how ModelVerse will help you move from problem to production.</p>
-                  <ul>
-                    <li>Explain the objective and the decision context</li>
-                    <li>Break down future workspace stages in accessible language</li>
-                    <li>Prepare for educational guidance in later phases</li>
-                  </ul>
+                <div className="dataset-list">
+                  {datasets.map((dataset) => (
+                    <article key={dataset.id} className="dataset-card">
+                      <div className="dataset-card-header">
+                        <div>
+                          <strong>{dataset.filename}</strong>
+                          <small>{dataset.status}</small>
+                        </div>
+                        <span className="dataset-pill">{dataset.row_count} rows</span>
+                      </div>
+                      <div className="dataset-meta-grid">
+                        <span>Size: {formatFileSize(dataset.file_size)}</span>
+                        <span>Cols: {dataset.column_count}</span>
+                        <span>Uploaded: {new Date(dataset.uploaded_at).toLocaleDateString()}</span>
+                      </div>
+                      <div className="dataset-actions">
+                        <Link href={`/projects/${project.id}/datasets/${dataset.id}`} className="button-secondary small-button">
+                          View dataset
+                        </Link>
+                        <button type="button" className="button-secondary small-button danger-button" onClick={() => void handleDeleteDataset(dataset.id)}>
+                          Delete
+                        </button>
+                      </div>
+                    </article>
+                  ))}
                 </div>
               )}
             </section>

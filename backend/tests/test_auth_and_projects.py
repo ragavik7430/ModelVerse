@@ -313,3 +313,249 @@ def test_invalid_project_mode_rejected(client):
         headers=auth_headers(client),
     )
     assert response.status_code == 422
+
+
+def test_problem_update_persists_on_project(client):
+    register_user(client)
+    headers = auth_headers(client)
+    project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Problem Project",
+            "problem_statement": "Old problem",
+            "objective": "Old objective",
+            "mode": "engineering",
+        },
+        headers=headers,
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/projects/{project['id']}",
+        json={
+            "problem_statement": "Updated problem statement",
+            "objective": "Updated objective",
+            "mode": "learning",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["problem_statement"] == "Updated problem statement"
+    assert response.json()["objective"] == "Updated objective"
+    assert response.json()["mode"] == "learning"
+
+
+def test_upload_valid_csv_dataset(client):
+    register_user(client)
+    headers = auth_headers(client)
+    project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Dataset Project",
+            "problem_statement": "Need a dataset.",
+            "objective": "Analyze quality.",
+            "mode": "engineering",
+        },
+        headers=headers,
+    ).json()
+
+    csv_content = b"age,city,score\n30,Paris,10\n,London,20\n45,,30\n"
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/datasets",
+        files={"file": ("customers.csv", csv_content, "text/csv")},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["filename"] == "customers.csv"
+    assert body["status"] in {"ready", "ready_with_warnings"}
+    assert body["row_count"] == 3
+    assert body["column_count"] == 3
+
+
+def test_reject_unauthenticated_dataset_upload(client):
+    register_user(client)
+    project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Dataset Project",
+            "problem_statement": "Need a dataset.",
+            "objective": "Analyze quality.",
+            "mode": "engineering",
+        },
+        headers=auth_headers(client),
+    ).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/datasets",
+        files={"file": ("customers.csv", b"name\nAlice\n", "text/csv")},
+    )
+    assert response.status_code == 401
+
+
+def test_reject_dataset_upload_to_other_users_project(client):
+    register_user(client, email="one@example.com")
+    register_user(client, email="two@example.com")
+    project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Other user project",
+            "problem_statement": "Not mine",
+            "objective": "Nope",
+            "mode": "engineering",
+        },
+        headers=auth_headers(client, email="one@example.com"),
+    ).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/datasets",
+        files={"file": ("customers.csv", b"name\nAlice\n", "text/csv")},
+        headers=auth_headers(client, email="two@example.com"),
+    )
+    assert response.status_code == 404
+
+
+def test_reject_unsupported_file_type(client):
+    register_user(client)
+    project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Dataset Project",
+            "problem_statement": "Need a dataset.",
+            "objective": "Analyze quality.",
+            "mode": "engineering",
+        },
+        headers=auth_headers(client),
+    ).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/datasets",
+        files={"file": ("customers.xlsx", b"PK\x03\x04fake", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=auth_headers(client),
+    )
+    assert response.status_code == 400
+
+
+def test_empty_csv_dataset_is_handled(client):
+    register_user(client)
+    headers = auth_headers(client)
+    project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Dataset Project",
+            "problem_statement": "Need a dataset.",
+            "objective": "Analyze quality.",
+            "mode": "engineering",
+        },
+        headers=headers,
+    ).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/datasets",
+        files={"file": ("empty.csv", b"", "text/csv")},
+        headers=headers,
+    )
+    assert response.status_code == 400
+
+
+def test_malformed_csv_dataset_is_rejected(client):
+    register_user(client)
+    headers = auth_headers(client)
+    project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Dataset Project",
+            "problem_statement": "Need a dataset.",
+            "objective": "Analyze quality.",
+            "mode": "engineering",
+        },
+        headers=headers,
+    ).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/datasets",
+        files={"file": ("broken.csv", b"name,age\nAlice,30,extra\n", "text/csv")},
+        headers=headers,
+    )
+    assert response.status_code == 400
+
+
+def test_list_and_get_dataset(client):
+    register_user(client)
+    headers = auth_headers(client)
+    project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Dataset Project",
+            "problem_statement": "Need a dataset.",
+            "objective": "Analyze quality.",
+            "mode": "engineering",
+        },
+        headers=headers,
+    ).json()
+
+    upload = client.post(
+        f"/api/v1/projects/{project['id']}/datasets",
+        files={"file": ("customers.csv", b"age,city\n30,Paris\n,London\n", "text/csv")},
+        headers=headers,
+    )
+    dataset_id = upload.json()["id"]
+
+    list_response = client.get(f"/api/v1/projects/{project['id']}/datasets", headers=headers)
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == 1
+
+    detail = client.get(f"/api/v1/datasets/{dataset_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["filename"] == "customers.csv"
+    assert detail.json()["summary"]["duplicate_rows"] >= 0
+
+
+def test_delete_own_dataset(client):
+    register_user(client)
+    headers = auth_headers(client)
+    project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Dataset Project",
+            "problem_statement": "Need a dataset.",
+            "objective": "Analyze quality.",
+            "mode": "engineering",
+        },
+        headers=headers,
+    ).json()
+
+    upload = client.post(
+        f"/api/v1/projects/{project['id']}/datasets",
+        files={"file": ("customers.csv", b"age,city\n30,Paris\n", "text/csv")},
+        headers=headers,
+    )
+    dataset_id = upload.json()["id"]
+
+    response = client.delete(f"/api/v1/datasets/{dataset_id}", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+
+
+def test_reject_another_users_dataset_access(client):
+    register_user(client, email="first@example.com")
+    register_user(client, email="second@example.com")
+    headers_first = auth_headers(client, email="first@example.com")
+    headers_second = auth_headers(client, email="second@example.com")
+    project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "First Project",
+            "problem_statement": "Owned by first",
+            "objective": "Goal",
+            "mode": "engineering",
+        },
+        headers=headers_first,
+    ).json()
+    dataset = client.post(
+        f"/api/v1/projects/{project['id']}/datasets",
+        files={"file": ("customers.csv", b"age\n30\n", "text/csv")},
+        headers=headers_first,
+    ).json()
+
+    assert client.get(f"/api/v1/datasets/{dataset['id']}", headers=headers_second).status_code == 404
+    assert client.delete(f"/api/v1/datasets/{dataset['id']}", headers=headers_second).status_code == 404

@@ -1170,6 +1170,155 @@ textarea:focus-visible {
   margin-top: 0;
 }
 
+.training-intro,
+.training-note,
+.learning-explanation {
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.training-form {
+  display: grid;
+  gap: 18px;
+  margin: 20px 0 28px;
+}
+
+.training-config-grid,
+.training-algorithm-list,
+.metric-split-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.training-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.5;
+}
+
+.training-check input {
+  margin-top: 4px;
+}
+
+.warning-check {
+  color: #8a4b08;
+}
+
+.training-algorithms {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.training-algorithms legend {
+  padding: 0 6px;
+  font-weight: 700;
+}
+
+.experiment-history,
+.experiment-results {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.experiment-history-list,
+.experiment-model-list {
+  display: grid;
+  gap: 12px;
+}
+
+.experiment-history-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: inherit;
+  text-align: left;
+  background: var(--surface-soft);
+  cursor: pointer;
+}
+
+.experiment-history-item.selected {
+  border-color: var(--green);
+}
+
+.experiment-history-item > span:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.experiment-history-item small {
+  color: var(--muted);
+}
+
+.experiment-status {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+  background: var(--surface-soft);
+}
+
+.status-completed {
+  color: #176b43;
+  background: #e9f7ef;
+}
+
+.status-failed {
+  color: #a52d2d;
+  background: #fff0f0;
+}
+
+.experiment-model-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.experiment-model-card pre {
+  max-width: 100%;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.metric-split {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.metric-split span,
+.engineering-detail {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.best-candidate {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
 .wide-card {
   grid-column: 1 / -1;
 }

@@ -6,14 +6,22 @@ import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 
 import {
   deleteDataset,
+  createExperiment,
   getProject,
+  getProjectExperiments,
+  getExperimentComparison,
   getProjectDatasets,
   getStoredAuthToken,
   logout,
+  optimizeExperiment,
   recommendProjectPipeline,
+  trainExperiment,
   updateProject,
   uploadDataset,
   type Dataset,
+  type Experiment,
+  type ExperimentComparison,
+  type ProblemType,
   type PipelineRecommendation,
   type Project,
 } from "@/lib/api";
@@ -23,6 +31,28 @@ const formatFileSize = (bytes: number): string => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 };
+
+const supportedAlgorithms = new Set([
+  "Logistic Regression",
+  "Random Forest",
+  "Gradient Boosting",
+  "Linear Regression",
+  "Random Forest Regressor",
+  "Gradient Boosting Regressor",
+  "K-Means",
+]);
+
+const isIdentifierLike = (column: string): boolean => {
+  const normalized = column.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/[-\s]/g, "_").toLowerCase();
+  return ["id", "uuid", "index", "identifier", "key"].includes(normalized) ||
+    normalized.startsWith("id_") || /_(id|uuid|index|identifier)$/.test(normalized);
+};
+
+const isProblemType = (value: string): value is ProblemType =>
+  value === "regression" || value === "classification" || value === "clustering";
+
+const formatMetric = (value: unknown): string =>
+  typeof value === "number" && Number.isFinite(value) ? value.toFixed(4) : "N/A";
 
 export default function ProjectDetailPage() {
   const router = useRouter();
@@ -36,6 +66,17 @@ export default function ProjectDetailPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [recommendation, setRecommendation] = useState<PipelineRecommendation | null>(null);
   const [analyzingRecommendation, setAnalyzingRecommendation] = useState(false);
+  const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [selectedExperimentId, setSelectedExperimentId] = useState<number | null>(null);
+  const [comparison, setComparison] = useState<ExperimentComparison | null>(null);
+  const [selectedAlgorithms, setSelectedAlgorithms] = useState<string[]>([]);
+  const [targetColumn, setTargetColumn] = useState("");
+  const [targetConfirmed, setTargetConfirmed] = useState(false);
+  const [allowIdentifierTarget, setAllowIdentifierTarget] = useState(false);
+  const [testSize, setTestSize] = useState(0.2);
+  const [randomState, setRandomState] = useState(42);
+  const [optimizeTraining, setOptimizeTraining] = useState(false);
+  const [training, setTraining] = useState(false);
   const [error, setError] = useState("");
   const [projectForm, setProjectForm] = useState({
     name: "",
@@ -53,12 +94,18 @@ export default function ProjectDetailPage() {
 
     const load = async () => {
       try {
-        const [projectResult, datasetList] = await Promise.all([
+        const [projectResult, datasetList, experimentList] = await Promise.all([
           getProject(projectId),
           getProjectDatasets(projectId),
+          getProjectExperiments(projectId),
         ]);
         setProject(projectResult);
         setDatasets(datasetList);
+        setExperiments(experimentList);
+        if (experimentList.length > 0) {
+          setSelectedExperimentId(experimentList[0].id);
+          setComparison(await getExperimentComparison(experimentList[0].id));
+        }
         setProjectForm({
           name: projectResult.name,
           problem_statement: projectResult.problem_statement,
@@ -144,11 +191,66 @@ export default function ProjectDetailPage() {
       setError("");
       const result = await recommendProjectPipeline(project.id);
       setRecommendation(result);
+      setSelectedAlgorithms(result.candidate_algorithms.filter((algorithm) => supportedAlgorithms.has(algorithm)));
+      setTargetColumn("");
+      setTargetConfirmed(false);
+      setAllowIdentifierTarget(false);
     } catch (err) {
       setRecommendation(null);
       setError(err instanceof Error ? err.message : "Unable to generate a pipeline recommendation.");
     } finally {
       setAnalyzingRecommendation(false);
+    }
+  };
+
+  const handleTraining = async () => {
+    if (!project || !recommendation || !isProblemType(recommendation.problem_type)) {
+      setError("Run a supported Phase 4 recommendation before creating a training experiment.");
+      return;
+    }
+    if (selectedAlgorithms.length === 0) {
+      setError("Select at least one supported algorithm from the Phase 4 recommendation.");
+      return;
+    }
+    if (recommendation.problem_type !== "clustering" && (!targetColumn || !targetConfirmed)) {
+      setError("Select and explicitly confirm a target column before training.");
+      return;
+    }
+
+    try {
+      setTraining(true);
+      setError("");
+      const experiment = await createExperiment(project.id, {
+        dataset_id: recommendation.dataset_id,
+        problem_type: recommendation.problem_type,
+        target_column: recommendation.problem_type === "clustering" ? null : targetColumn,
+        target_confirmed: recommendation.problem_type === "clustering" ? false : targetConfirmed,
+        allow_identifier_target: allowIdentifierTarget,
+        selected_algorithms: selectedAlgorithms,
+        test_size: testSize,
+        random_state: randomState,
+        optimize: optimizeTraining,
+      });
+      const result = optimizeTraining
+        ? await optimizeExperiment(experiment.id)
+        : await trainExperiment(experiment.id);
+      setExperiments((current) => [result, ...current.filter((item) => item.id !== result.id)]);
+      setSelectedExperimentId(result.id);
+      setComparison(await getExperimentComparison(result.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to complete the training experiment.");
+    } finally {
+      setTraining(false);
+    }
+  };
+
+  const handleSelectExperiment = async (experimentId: number) => {
+    try {
+      setError("");
+      setSelectedExperimentId(experimentId);
+      setComparison(await getExperimentComparison(experimentId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load the model comparison.");
     }
   };
 
@@ -175,6 +277,12 @@ export default function ProjectDetailPage() {
       </main>
     );
   }
+
+  const datasetColumns = Array.isArray(recommendation?.dataset_summary.columns)
+    ? recommendation.dataset_summary.columns.filter((column): column is string => typeof column === "string")
+    : [];
+  const selectedExperiment = experiments.find((experiment) => experiment.id === selectedExperimentId) ?? null;
+  const comparisonCandidates = comparison?.candidates ?? selectedExperiment?.models ?? [];
 
   const navigation = ["Problem", "Dataset", "Pipeline", "Experiments", "Explainability", "Deployment", "Monitoring"];
 
@@ -413,6 +521,226 @@ export default function ProjectDetailPage() {
                   <p>Use the action above to generate a pipeline recommendation based on the project problem and dataset quality.</p>
                 </div>
               )}
+            </section>
+
+            <section className="project-detail-card wide-card" aria-labelledby="training-heading">
+              <div className="section-header-row">
+                <div>
+                  <p className="section-kicker">PHASE 5</p>
+                  <h2 id="training-heading">ML Training &amp; Experimentation</h2>
+                </div>
+                <span className="dataset-pill">{experiments.length} saved experiments</span>
+              </div>
+
+              <p className="training-intro">
+                Review a fresh Phase 4 recommendation, confirm the training target, then compare reproducible model runs.
+                Recommendations remain on-demand; completed experiment results are saved in this workspace.
+              </p>
+
+              {!recommendation ? (
+                <div className="empty-state compact">
+                  <h3>Review a pipeline recommendation first</h3>
+                  <p>Run “Analyze &amp; Recommend” above to load the current candidate algorithms and dataset profile. Previous experiment history remains available below.</p>
+                </div>
+              ) : (
+                <div className="training-form">
+                  <div className="training-config-grid">
+                    <div className="field">
+                      <span>Dataset</span>
+                      <strong>{datasets.find((dataset) => dataset.id === recommendation.dataset_id)?.filename ?? `Dataset ${recommendation.dataset_id}`}</strong>
+                    </div>
+                    <div className="field">
+                      <span>Recommended problem type</span>
+                      <strong>{recommendation.problem_type}</strong>
+                    </div>
+                  </div>
+
+                  {recommendation.problem_type === "unknown" ? (
+                    <div className="error-box">Phase 4 could not determine a supported problem type. Update the problem definition and request a new recommendation before training.</div>
+                  ) : null}
+
+                  {recommendation.problem_type !== "clustering" && isProblemType(recommendation.problem_type) ? (
+                    <div className="training-config-grid">
+                      <label className="field">
+                        <span>Confirm target column</span>
+                        <select value={targetColumn} onChange={(event) => { setTargetColumn(event.target.value); setTargetConfirmed(false); setAllowIdentifierTarget(false); }}>
+                          <option value="">Select the target explicitly</option>
+                          {datasetColumns.map((column) => <option key={column} value={column}>{column}</option>)}
+                        </select>
+                      </label>
+                      <label className="training-check">
+                        <input type="checkbox" checked={targetConfirmed} disabled={!targetColumn} onChange={(event) => setTargetConfirmed(event.target.checked)} />
+                        <span>I reviewed and confirm this is the target the model should learn to predict.</span>
+                      </label>
+                    </div>
+                  ) : null}
+
+                  {targetColumn && isIdentifierLike(targetColumn) ? (
+                    <label className="training-check warning-check">
+                      <input type="checkbox" checked={allowIdentifierTarget} onChange={(event) => setAllowIdentifierTarget(event.target.checked)} />
+                      <span>Allow this identifier-like target only if predicting identifiers is intentional.</span>
+                    </label>
+                  ) : null}
+
+                  <fieldset className="training-algorithms">
+                    <legend>Candidate algorithms from the Phase 4 recommendation</legend>
+                    {recommendation.candidate_algorithms.filter((algorithm) => supportedAlgorithms.has(algorithm)).length === 0 ? (
+                      <p>No Phase 4 candidate is currently supported by the Phase 5 training registry.</p>
+                    ) : (
+                      <div className="training-algorithm-list">
+                        {recommendation.candidate_algorithms.filter((algorithm) => supportedAlgorithms.has(algorithm)).map((algorithm) => (
+                          <label className="training-check" key={algorithm}>
+                            <input
+                              type="checkbox"
+                              checked={selectedAlgorithms.includes(algorithm)}
+                              onChange={(event) => setSelectedAlgorithms((current) => event.target.checked
+                                ? [...current, algorithm]
+                                : current.filter((item) => item !== algorithm))}
+                            />
+                            <span>{algorithm}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {recommendation.candidate_algorithms.some((algorithm) => !supportedAlgorithms.has(algorithm)) ? (
+                      <p className="training-note">Some recommended candidates are not in the initial Phase 5 registry and cannot be selected.</p>
+                    ) : null}
+                  </fieldset>
+
+                  <div className="training-config-grid">
+                    <label className="field">
+                      <span>Test data held out</span>
+                      <select value={testSize} onChange={(event) => setTestSize(Number(event.target.value))}>
+                        <option value={0.2}>20%</option>
+                        <option value={0.25}>25%</option>
+                        <option value={0.3}>30%</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Reproducible random seed</span>
+                      <input type="number" min={0} max={2147483647} value={randomState} onChange={(event) => setRandomState(Number(event.target.value))} />
+                    </label>
+                  </div>
+
+                  <label className="training-check">
+                    <input type="checkbox" checked={optimizeTraining} onChange={(event) => setOptimizeTraining(event.target.checked)} />
+                    <span>Run bounded Optuna hyperparameter optimization before final evaluation.</span>
+                  </label>
+                  <p className="training-note">Preprocessing is fitted on training data only. The test split is held out for final metrics; tuning uses validation data.</p>
+
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={() => void handleTraining()}
+                    disabled={training || !isProblemType(recommendation.problem_type)}
+                  >
+                    {training ? "Training in progress..." : optimizeTraining ? "Create & optimize experiment" : "Create & train experiment"}
+                  </button>
+                </div>
+              )}
+
+              {training ? <p className="training-note" role="status">The backend is training the selected candidates. This button state ends when the actual run response arrives; no simulated progress is shown.</p> : null}
+
+              <div className="experiment-history">
+                <h3>Experiment history</h3>
+                {experiments.length === 0 ? (
+                  <div className="empty-state compact"><p>No saved experiments yet.</p></div>
+                ) : (
+                  <div className="experiment-history-list">
+                    {experiments.map((experiment) => (
+                      <button
+                        type="button"
+                        key={experiment.id}
+                        className={`experiment-history-item ${selectedExperimentId === experiment.id ? "selected" : ""}`}
+                        onClick={() => void handleSelectExperiment(experiment.id)}
+                      >
+                        <span><strong>Experiment {experiment.id}</strong><small>{experiment.problem_type} · {experiment.target_column ?? "no target"}</small></span>
+                        <span className={`experiment-status status-${experiment.status}`}>{experiment.status}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {selectedExperiment ? (
+                <div className="experiment-results">
+                  <div className="section-header-row">
+                    <h3>{selectedExperiment.experiment_name}</h3>
+                    <span className={`experiment-status status-${selectedExperiment.status}`}>{selectedExperiment.status}</span>
+                  </div>
+                  <p>Experiment ID: {selectedExperiment.id} · Dataset ID: {selectedExperiment.dataset_id ?? String(selectedExperiment.configuration.dataset_id_snapshot ?? "deleted")} · Created {new Date(selectedExperiment.created_at).toLocaleString()}</p>
+                  <p>Problem: {selectedExperiment.problem_type} · Target: {selectedExperiment.target_column ?? "none"} · Random seed: {selectedExperiment.random_state} · Test split: {(selectedExperiment.test_size * 100).toFixed(0)}%</p>
+                  {selectedExperiment.error_message ? <div className="error-box">{selectedExperiment.error_message}</div> : null}
+                  {selectedExperiment.comparison_policy ? <p><strong>Best-candidate policy:</strong> {selectedExperiment.comparison_policy}</p> : null}
+                  {selectedExperiment.best_model_id ? (
+                    <p className="best-candidate"><strong>Best candidate:</strong> {comparisonCandidates.find((model) => model.id === selectedExperiment.best_model_id)?.algorithm ?? `Model ${selectedExperiment.best_model_id}`}</p>
+                  ) : null}
+                  {comparisonCandidates.length === 0 ? <p>No candidate model results are available for this experiment.</p> : (
+                    <div className="experiment-model-list">
+                      {comparisonCandidates.map((model) => {
+                        const testMetrics = model.metrics.test && typeof model.metrics.test === "object"
+                          ? model.metrics.test as Record<string, unknown>
+                          : {};
+                        const trainMetrics = model.metrics.train && typeof model.metrics.train === "object"
+                          ? model.metrics.train as Record<string, unknown>
+                          : {};
+                        const validationMetrics = model.metrics.validation && typeof model.metrics.validation === "object"
+                          ? model.metrics.validation as Record<string, unknown>
+                          : {};
+                        const optimization = model.metrics.optimization && typeof model.metrics.optimization === "object"
+                          ? model.metrics.optimization as Record<string, unknown>
+                          : null;
+                        return (
+                          <article className="experiment-model-card" key={model.id}>
+                            <div className="section-header-row">
+                              <h4>{model.algorithm}</h4>
+                              <span className={`experiment-status status-${model.status}`}>{model.status}</span>
+                            </div>
+                            {model.error_message ? <p className="error-box">{model.error_message}</p> : null}
+                            {model.status === "completed" ? (
+                              <>
+                                <div className="metric-split-grid">
+                                  {[
+                                    ["Train", trainMetrics],
+                                    ["Validation", validationMetrics],
+                                    ["Test", testMetrics],
+                                  ].map(([label, values]) => (
+                                    <div className="metric-split" key={label as string}>
+                                      <strong>{label as string} metrics</strong>
+                                      {Object.entries(values as Record<string, unknown>)
+                                        .filter(([, value]) => typeof value === "number" || value === null)
+                                        .map(([name, value]) => <span key={name}>{name}: {formatMetric(value)}</span>)}
+                                    </div>
+                                  ))}
+                                </div>
+                                {testMetrics.confusion_matrix ? <details><summary>Test confusion matrix</summary><pre>{JSON.stringify(testMetrics.confusion_matrix, null, 2)}</pre></details> : null}
+                                {optimization ? <p><strong>Optuna result:</strong> objective {formatMetric(optimization.best_objective)} · trials {String(optimization.n_trials)} · parameters {JSON.stringify(optimization.best_parameters)}</p> : null}
+                                <p className="engineering-detail"><strong>MLflow run ID:</strong> {model.mlflow_run_id ?? "not available"}</p>
+                                {project.mode === "engineering" ? (
+                                  <>
+                                    <details><summary>Model parameters</summary><pre>{JSON.stringify(model.parameters, null, 2)}</pre></details>
+                                    <details><summary>Preprocessing configuration</summary><pre>{JSON.stringify(model.preprocessing, null, 2)}</pre></details>
+                                  </>
+                                ) : (
+                                  <p className="learning-explanation">
+                                    Training learns patterns from the training split. Validation metrics guided candidate selection; the test metrics above were calculated on the held-out split.{" "}
+                                    {selectedExperiment.problem_type === "regression"
+                                      ? "For regression, lower MAE/RMSE is better and R² summarizes variance explained."
+                                      : selectedExperiment.problem_type === "classification"
+                                        ? "For classification, higher accuracy and macro F1 indicate stronger overall class prediction."
+                                        : "For clustering, silhouette summarizes how separated the generated groups are; higher values indicate better separation."}{" "}
+                                    These values come from this experiment’s actual predictions.
+                                  </p>
+                                )}
+                              </>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </section>
           </div>
         </main>

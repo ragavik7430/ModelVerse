@@ -17,6 +17,17 @@ class Settings:
         "DATASET_STORAGE_PATH",
         os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "datasets"),
     )
+    MODEL_ARTIFACT_STORAGE_PATH: str = os.getenv(
+        "MODEL_ARTIFACT_STORAGE_PATH",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "models"),
+    )
+    MLFLOW_ARTIFACT_STORAGE_PATH: str = os.getenv(
+        "MLFLOW_ARTIFACT_STORAGE_PATH",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "mlruns"),
+    )
+    MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "")
+    OPTUNA_N_TRIALS: int = int(os.getenv("OPTUNA_N_TRIALS", "10"))
+    OPTUNA_TIMEOUT_SECONDS: int = int(os.getenv("OPTUNA_TIMEOUT_SECONDS", "60"))
 
     cors_env = os.getenv("BACKEND_CORS_ORIGINS", '["http://localhost:3000"]')
     try:

@@ -14,6 +14,7 @@ from app.config.settings import settings
 from app.models.base import Base
 # Import all models so metadata is populated
 from app.models.dataset import Dataset
+from app.models.experiment import Experiment, TrainedModel
 from app.models.project import Project
 from app.models.user import User
 

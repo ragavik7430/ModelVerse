@@ -2,10 +2,11 @@
 
 An AI-powered Multi-Agent MLOps and Learning Platform.
 
-## Architecture (Phase 2)
+## Architecture
 - **Frontend**: Next.js 16 (React 19, Tailwind CSS v4)
 - **Backend**: FastAPI (Python 3)
 - **Database**: PostgreSQL (SQLAlchemy + Alembic)
+- **ML training**: scikit-learn pipelines with local MLflow tracking and optional Optuna optimization
 - **Containerization**: Docker Compose for local infrastructure
 
 ## Local Setup
@@ -76,6 +77,21 @@ Phase 2 implements real user-owned project records with:
 - engineering and learning mode persistence
 - protected access for all project routes
 
+## ML Training & Experimentation
+Phase 5 consumes the current Phase 4 recommendation and requires an explicitly confirmed target for supervised training. The backend offers the recommended models it supports, fits reusable numeric/categorical preprocessing on the training split only, evaluates separate training/validation/test splits, and selects the best candidate deterministically using validation metrics.
+
+Experiment and candidate metadata are stored in PostgreSQL. Model files and the default local MLflow file store are written under ignored `backend/data/` directories; `MODEL_ARTIFACT_STORAGE_PATH`, `MLFLOW_ARTIFACT_STORAGE_PATH`, and `MLFLOW_TRACKING_URI` can configure those locations. Optional Optuna tuning uses a bounded trial count (`OPTUNA_N_TRIALS`, default 10, maximum 20) and timeout (`OPTUNA_TIMEOUT_SECONDS`, default 60, maximum 600). Tuning is opt-in.
+
+Phase 5 endpoints include:
+- `POST /api/v1/projects/{project_id}/experiments`
+- `POST /api/v1/experiments/{experiment_id}/train`
+- `POST /api/v1/experiments/{experiment_id}/optimize`
+- `GET /api/v1/projects/{project_id}/experiments`
+- `GET /api/v1/experiments/{experiment_id}`
+- `GET /api/v1/experiments/{experiment_id}/comparison`
+
+The initial algorithm registry covers the Phase 4 classification and regression candidates and K-Means. Hierarchical clustering is not offered because it has no out-of-sample prediction path for the held-out evaluation contract. Recommendations remain on-demand; experiment history is persisted.
+
 ## Testing
 Run backend tests:
 ```bash
@@ -91,6 +107,6 @@ npm run build
 ```
 
 ## Known Limitations
-- Docker/PostgreSQL verification is blocked in this environment because the Docker daemon is unavailable.
-- Future lifecycle features such as dataset intelligence, pipeline execution, and deployment flows are not implemented in Phase 2.
-- The project navigation sections marked as “Coming soon” are placeholders only and are not functional yet.
+- Hierarchical clustering is not in the initial training registry because it has no out-of-sample prediction path for held-out evaluation.
+- Explainability, deployment, monitoring, and other later lifecycle capabilities remain future phases.
+- Some workspace navigation sections remain placeholders for those later phases.

@@ -87,6 +87,65 @@ export type PipelineRecommendation = {
   errors: string[];
 };
 
+export type ProblemType = "regression" | "classification" | "clustering";
+
+export type TrainedModel = {
+  id: number;
+  experiment_id: number;
+  name: string;
+  algorithm: string;
+  status: "queued" | "running" | "completed" | "failed";
+  parameters: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+  preprocessing: Record<string, unknown>;
+  mlflow_run_id: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Experiment = {
+  id: number;
+  project_id: number;
+  dataset_id: number | null;
+  problem_type: ProblemType;
+  target_column: string | null;
+  experiment_name: string;
+  status: "queued" | "running" | "completed" | "failed";
+  random_state: number;
+  test_size: number;
+  configuration: Record<string, unknown>;
+  best_model_id: number | null;
+  comparison_policy: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  models: TrainedModel[];
+};
+
+export type ExperimentComparison = {
+  experiment_id: number;
+  status: Experiment["status"];
+  problem_type: ProblemType;
+  comparison_policy: string | null;
+  best_model_id: number | null;
+  candidates: TrainedModel[];
+};
+
+export type ExperimentCreate = {
+  dataset_id: number;
+  problem_type: ProblemType;
+  target_column: string | null;
+  target_confirmed: boolean;
+  allow_identifier_target: boolean;
+  selected_algorithms: string[];
+  test_size: number;
+  random_state: number;
+  optimize: boolean;
+};
+
 const STORAGE_KEY = "modelverse_token";
 const HEALTH_ENDPOINT = "/system/health";
 
@@ -136,6 +195,8 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, requireAut
       const payload = await response.json();
       if (payload && typeof payload.detail === "string") {
         message = payload.detail;
+      } else if (payload && typeof payload.detail === "object" && typeof payload.detail.message === "string") {
+        message = payload.detail.message;
       }
     } catch {
       message = `Request failed with status ${response.status}.`;
@@ -287,4 +348,27 @@ export async function recommendProjectPipeline(projectId: number): Promise<Pipel
   return apiRequest<PipelineRecommendation>(`/projects/${projectId}/recommend`, {
     method: "POST",
   }, true);
+}
+
+export async function getProjectExperiments(projectId: number): Promise<Experiment[]> {
+  return apiRequest<Experiment[]>(`/projects/${projectId}/experiments`, { method: "GET" }, true);
+}
+
+export async function createExperiment(projectId: number, payload: ExperimentCreate): Promise<Experiment> {
+  return apiRequest<Experiment>(`/projects/${projectId}/experiments`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, true);
+}
+
+export async function trainExperiment(experimentId: number): Promise<Experiment> {
+  return apiRequest<Experiment>(`/experiments/${experimentId}/train`, { method: "POST" }, true);
+}
+
+export async function optimizeExperiment(experimentId: number): Promise<Experiment> {
+  return apiRequest<Experiment>(`/experiments/${experimentId}/optimize`, { method: "POST" }, true);
+}
+
+export async function getExperimentComparison(experimentId: number): Promise<ExperimentComparison> {
+  return apiRequest<ExperimentComparison>(`/experiments/${experimentId}/comparison`, { method: "GET" }, true);
 }

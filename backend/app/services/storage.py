@@ -42,6 +42,20 @@ def save_uploaded_dataset(project_id: int, uploaded_file: UploadFile) -> Tuple[s
     return storage_key, file_path, uploaded_file.filename
 
 
+def resolve_dataset_storage_path(project_id: int, storage_key: str) -> Path:
+    if not storage_key or Path(storage_key).name != storage_key or "/" in storage_key or "\\" in storage_key:
+        raise ValueError("Dataset storage reference is invalid.")
+
+    storage_root = ensure_dataset_storage_root().resolve()
+    project_dir = (storage_root / f"project_{project_id}").resolve()
+    if project_dir.parent != storage_root:
+        raise ValueError("Dataset storage reference is invalid.")
+    dataset_path = (project_dir / storage_key).resolve()
+    if dataset_path.parent != project_dir or not dataset_path.is_file():
+        raise ValueError("Dataset file could not be found in managed storage.")
+    return dataset_path
+
+
 def delete_dataset_file(file_path: str) -> None:
     file_reference = Path(file_path)
     if file_reference.exists() and file_reference.is_file():

@@ -33,3 +33,4 @@ class Dataset(Base):
     )
 
     project = relationship("Project", back_populates="datasets")
+    experiments = relationship("Experiment", back_populates="dataset")

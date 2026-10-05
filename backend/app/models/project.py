@@ -30,3 +30,4 @@ class Project(Base):
 
     user = relationship("User", back_populates="projects")
     datasets = relationship("Dataset", back_populates="project", cascade="all, delete-orphan")
+    experiments = relationship("Experiment", back_populates="project", cascade="all, delete-orphan")

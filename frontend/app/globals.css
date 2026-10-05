@@ -1142,6 +1142,34 @@ textarea:focus-visible {
   line-height: 1.7;
 }
 
+.recommendation-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.recommendation-summary {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.recommendation-summary > div {
+  min-width: 152px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.recommendation-summary h3 {
+  margin: 8px 0 0;
+  font-size: 20px;
+}
+
+.recommendation-grid {
+  margin-top: 0;
+}
+
 .wide-card {
   grid-column: 1 / -1;
 }

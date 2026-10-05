@@ -10,9 +10,11 @@ import {
   getProjectDatasets,
   getStoredAuthToken,
   logout,
+  recommendProjectPipeline,
   updateProject,
   uploadDataset,
   type Dataset,
+  type PipelineRecommendation,
   type Project,
 } from "@/lib/api";
 
@@ -32,6 +34,8 @@ export default function ProjectDetailPage() {
   const [savingProject, setSavingProject] = useState(false);
   const [uploadingDataset, setUploadingDataset] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [recommendation, setRecommendation] = useState<PipelineRecommendation | null>(null);
+  const [analyzingRecommendation, setAnalyzingRecommendation] = useState(false);
   const [error, setError] = useState("");
   const [projectForm, setProjectForm] = useState({
     name: "",
@@ -121,8 +125,30 @@ export default function ProjectDetailPage() {
     try {
       await deleteDataset(datasetId);
       setDatasets((current) => current.filter((dataset) => dataset.id !== datasetId));
+      setRecommendation(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to delete the dataset.");
+    }
+  };
+
+  const handleAnalyzeRecommendation = async () => {
+    if (!project) return;
+    if (datasets.length === 0) {
+      setRecommendation(null);
+      setError("Add a dataset before requesting an AI pipeline recommendation.");
+      return;
+    }
+
+    try {
+      setAnalyzingRecommendation(true);
+      setError("");
+      const result = await recommendProjectPipeline(project.id);
+      setRecommendation(result);
+    } catch (err) {
+      setRecommendation(null);
+      setError(err instanceof Error ? err.message : "Unable to generate a pipeline recommendation.");
+    } finally {
+      setAnalyzingRecommendation(false);
     }
   };
 
@@ -318,6 +344,73 @@ export default function ProjectDetailPage() {
                       </div>
                     </article>
                   ))}
+                </div>
+              )}
+            </section>
+
+            <section className="project-detail-card wide-card">
+              <div className="section-header-row">
+                <h2>AI Pipeline Recommendation</h2>
+                <button type="button" className="button-primary small-button" onClick={() => void handleAnalyzeRecommendation()} disabled={analyzingRecommendation || datasets.length === 0}>
+                  {analyzingRecommendation ? "Analyzing..." : "Analyze & Recommend"}
+                </button>
+              </div>
+
+              {datasets.length === 0 ? (
+                <div className="empty-state compact">
+                  <h3>No dataset available</h3>
+                  <p>Upload a dataset to run the agentic pipeline analysis.</p>
+                </div>
+              ) : recommendation ? (
+                <div className="recommendation-panel">
+                  <div className="recommendation-summary">
+                    <div>
+                      <span className="section-kicker">Problem type</span>
+                      <h3>{recommendation.problem_type}</h3>
+                    </div>
+                    <div>
+                      <span className="section-kicker">Confidence</span>
+                      <h3>{recommendation.confidence.toFixed(2)}</h3>
+                    </div>
+                  </div>
+
+                  <div className="detail-grid recommendation-grid">
+                    <div className="project-detail-card">
+                      <h4>Recommended pipeline</h4>
+                      <p>{recommendation.recommended_pipeline}</p>
+                      <ul>
+                        {recommendation.candidate_algorithms.length > 0 ? (
+                          recommendation.candidate_algorithms.map((algorithm) => <li key={algorithm}>{algorithm}</li>)
+                        ) : (
+                          <li>No candidate algorithms could be inferred.</li>
+                        )}
+                      </ul>
+                    </div>
+
+                    <div className="project-detail-card">
+                      <h4>Preprocessing</h4>
+                      <ul>
+                        {recommendation.preprocessing_steps.length > 0 ? (
+                          recommendation.preprocessing_steps.map((step) => <li key={step}>{step}</li>)
+                        ) : (
+                          <li>No preprocessing steps flagged.</li>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="project-detail-card">
+                    <h4>{project.mode === "learning" ? "Plain-language explanation" : "Technical rationale"}</h4>
+                    <p>{project.mode === "learning" ? recommendation.explanation : recommendation.rationale}</p>
+                    <p><strong>Recommendation rationale:</strong> {recommendation.rationale}</p>
+                    <p><strong>Warnings:</strong> {recommendation.warnings.length > 0 ? recommendation.warnings.join("; ") : "None"}</p>
+                    <p><strong>Needs review:</strong> {recommendation.warnings.length > 0 ? recommendation.warnings.join("; ") : "Target definition and final pipeline selection."}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="empty-state compact">
+                  <h3>Analysis not run</h3>
+                  <p>Use the action above to generate a pipeline recommendation based on the project problem and dataset quality.</p>
                 </div>
               )}
             </section>

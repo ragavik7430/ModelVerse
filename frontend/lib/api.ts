@@ -66,6 +66,27 @@ export type Dataset = {
   summary?: DatasetSummary;
 };
 
+export type PipelineRecommendation = {
+  project_id: number;
+  dataset_id: number;
+  project_name?: string;
+  problem_statement: string;
+  objective: string;
+  problem_type: string;
+  target_candidate?: string | null;
+  feature_candidates: string[];
+  dataset_summary: Record<string, unknown>;
+  dataset_characteristics: Record<string, unknown>;
+  recommended_pipeline: string;
+  candidate_algorithms: string[];
+  preprocessing_steps: string[];
+  rationale: string;
+  confidence: number;
+  warnings: string[];
+  explanation: string;
+  errors: string[];
+};
+
 const STORAGE_KEY = "modelverse_token";
 const HEALTH_ENDPOINT = "/system/health";
 
@@ -259,5 +280,11 @@ export async function uploadDataset(projectId: number, file: File): Promise<Data
 export async function deleteDataset(datasetId: number): Promise<{ deleted: boolean; dataset_id: number }> {
   return apiRequest<{ deleted: boolean; dataset_id: number }>(`/datasets/${datasetId}`, {
     method: "DELETE",
+  }, true);
+}
+
+export async function recommendProjectPipeline(projectId: number): Promise<PipelineRecommendation> {
+  return apiRequest<PipelineRecommendation>(`/projects/${projectId}/recommend`, {
+    method: "POST",
   }, true);
 }

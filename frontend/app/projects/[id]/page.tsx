@@ -18,6 +18,8 @@ import {
   trainExperiment,
   updateProject,
   uploadDataset,
+  explainModel,
+  sendChatMessage,
   type Dataset,
   type Experiment,
   type ExperimentComparison,
@@ -84,6 +86,55 @@ export default function ProjectDetailPage() {
     objective: "",
     mode: "engineering" as "engineering" | "learning",
   });
+
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessage, setChatMessage] = useState("");
+  const [chatHistory, setChatHistory] = useState<{role: string, text: string}[]>([]);
+  const [sendingChat, setSendingChat] = useState(false);
+  const [explainData, setExplainData] = useState<Record<number, {
+    model_id: number;
+    experiment_id: number;
+    algorithm: string;
+    problem_type: string;
+    status: string;
+    explanation_method: string;
+    feature_importance: Array<{ feature: string; contribution: number; absolute_contribution: number; direction: "positive" | "negative" | "neutral"; metadata?: Record<string, unknown> }>;
+    local_explanation: Array<{ feature: string; contribution: number; absolute_contribution: number; direction: "positive" | "negative" | "neutral"; metadata?: Record<string, unknown> }> | null;
+    base_value: number | null;
+    prediction: number | null;
+    explanation_summary: string;
+    limitations: string[];
+    generated_at: string;
+  }>>({});
+  const [explainingModel, setExplainingModel] = useState<number | null>(null);
+
+  const handleExplainModel = async (modelId: number) => {
+    try {
+      setExplainingModel(modelId);
+      const res = await explainModel(modelId);
+      setExplainData(prev => ({ ...prev, [modelId]: res }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to generate explanations.");
+    } finally {
+      setExplainingModel(null);
+    }
+  };
+
+  const handleSendChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatMessage.trim()) return;
+    try {
+      setSendingChat(true);
+      setChatHistory(prev => [...prev, {role: "user", text: chatMessage}]);
+      const res = await sendChatMessage(project!.id, chatMessage);
+      setChatHistory(prev => [...prev, {role: "assistant", text: res.reply}]);
+      setChatMessage("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to send message");
+    } finally {
+      setSendingChat(false);
+    }
+  };
 
   useEffect(() => {
     const token = getStoredAuthToken();
@@ -330,6 +381,11 @@ export default function ProjectDetailPage() {
             <strong>{project.name}</strong>
           </div>
           <div className="topbar-right">
+            {project.mode === "learning" && (
+              <button className="button-primary small-button" style={{ marginRight: "16px" }} onClick={() => setChatOpen(!chatOpen)}>
+                {chatOpen ? "Close AI Tutor" : "Chat with AI Tutor"}
+              </button>
+            )}
             <div className="mode-switch" role="group" aria-label="Project mode switch">
               <button className={project.mode === "engineering" ? "selected" : ""} onClick={() => handleModeChange("engineering")} aria-pressed={project.mode === "engineering"}>
                 Engineering
@@ -354,6 +410,25 @@ export default function ProjectDetailPage() {
           </div>
 
           {error ? <div className="error-box">{error}</div> : null}
+
+          {chatOpen && project.mode === "learning" && (
+            <div className="chat-window" style={{ marginBottom: "24px", padding: "16px", backgroundColor: "#fff", border: "1px solid #e5e7eb", borderRadius: "8px" }}>
+              <h3 style={{ marginBottom: "16px", fontWeight: "bold" }}>AI Tutor</h3>
+              <div className="chat-history" style={{ maxHeight: "300px", overflowY: "auto", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                {chatHistory.length === 0 ? <p style={{ color: "#6b7280" }}>Ask a question about your datasets, models, or ML concepts!</p> : null}
+                {chatHistory.map((msg, idx) => (
+                  <div key={idx} style={{ alignSelf: msg.role === "user" ? "flex-end" : "flex-start", backgroundColor: msg.role === "user" ? "#eff6ff" : "#f3f4f6", padding: "8px 12px", borderRadius: "8px", maxWidth: "80%" }}>
+                    <strong style={{ fontSize: "12px", color: "#6b7280" }}>{msg.role === "user" ? "You" : "AI"}</strong>
+                    <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{msg.text}</p>
+                  </div>
+                ))}
+              </div>
+              <form onSubmit={handleSendChat} style={{ display: "flex", gap: "8px" }}>
+                <input type="text" value={chatMessage} onChange={e => setChatMessage(e.target.value)} placeholder="Type your message..." style={{ flex: 1, padding: "8px", border: "1px solid #d1d5db", borderRadius: "4px" }} disabled={sendingChat} />
+                <button type="submit" className="button-primary small-button" disabled={sendingChat || !chatMessage.trim()}>{sendingChat ? "Sending..." : "Send"}</button>
+              </form>
+            </div>
+          )}
 
           <div className="detail-grid">
             <section className="project-detail-card wide-card">
@@ -732,6 +807,44 @@ export default function ProjectDetailPage() {
                                     These values come from this experiment’s actual predictions.
                                   </p>
                                 )}
+                                <div style={{ marginTop: "16px" }}>
+                                  <button type="button" className="button-secondary small-button" onClick={() => void handleExplainModel(model.id)} disabled={explainingModel === model.id}>
+                                    {explainingModel === model.id ? "Analyzing..." : "Explain Model (SHAP + Learning Summary)"}
+                                  </button>
+                                  {explainData[model.id] && (
+                                    <div className="explainability-panel" style={{ marginTop: "8px", padding: "16px", backgroundColor: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: "14px" }}>
+                                      {project.mode === "engineering" ? (
+                                        <>
+                                          <h5 style={{ fontWeight: "bold", marginBottom: "8px" }}>Engineering Details (Method: {explainData[model.id].explanation_method})</h5>
+                                          {explainData[model.id].feature_importance.length > 0 ? (
+                                            <ul style={{ listStyleType: "none", padding: 0, marginBottom: "16px" }}>
+                                              {explainData[model.id].feature_importance.map((item) => (
+                                                <li key={item.feature} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #e5e7eb", padding: "4px 0" }}>
+                                                  <span>{item.feature}</span>
+                                                  <span>{item.contribution.toFixed(4)}</span>
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          ) : (
+                                            <p style={{ color: "#ef4444", marginBottom: "8px" }}>Model is unsupported for numerical feature importances.</p>
+                                          )}
+                                          <p><strong>Summary:</strong> {explainData[model.id].explanation_summary}</p>
+                                          <p><strong>Limitations:</strong> {explainData[model.id].limitations.join("; ") || "No specific limitations reported."}</p>
+                                          {explainData[model.id].prediction !== null ? <p><strong>Prediction sample:</strong> {explainData[model.id].prediction?.toFixed(4)}</p> : null}
+                                        </>
+                                      ) : (
+                                        <>
+                                          <h5 style={{ fontWeight: "bold", marginBottom: "8px" }}>Model Explanation</h5>
+                                          <p style={{ marginBottom: "12px", whiteSpace: "pre-wrap" }}>{explainData[model.id].explanation_summary}</p>
+                                          <p style={{ fontSize: "12px", color: "#6b7280" }}><strong>Note:</strong> Feature importance indicates influence on the model&apos;s predictions, not necessarily a real-world causal relationship.</p>
+                                          {explainData[model.id].limitations.length > 0 && (
+                                            <p style={{ marginTop: "12px", fontSize: "13px" }}><strong>Limitations:</strong> {explainData[model.id].limitations.join("; ")}</p>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
                               </>
                             ) : null}
                           </article>

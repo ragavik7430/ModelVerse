@@ -1,6 +1,9 @@
+import os
 from typing import List
+from google import genai
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.agents import execute_agent_graph
@@ -163,3 +166,55 @@ def recommend_project_pipeline(
         errors=result.get("errors") or [],
     )
     return recommendation
+
+
+class ChatMessage(BaseModel):
+    message: str
+
+@router.post("/{project_id}/chat")
+def project_chat(
+    project_id: int,
+    payload: ChatMessage,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project is None or project.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    if project.mode != "learning":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chat is only available in learning mode.")
+
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message is required.")
+
+    try:
+        from app.services.rag_service import retrieve_context
+        rag_context_docs = retrieve_context(project.id, message, top_k=5)
+    except Exception as e:
+        rag_context_docs = []
+
+    context = f"Project Name: {project.name}\n"
+    if rag_context_docs:
+        context += "Relevant RAG Context:\n"
+        for doc in rag_context_docs:
+            context += f"- [{doc.get('source_type', 'unknown')}] {doc.get('title', 'Untitled')}: {doc.get('text', '')}\n"
+    else:
+        context += "No additional context found in the RAG store.\n"
+
+    prompt = f"Context:\n{context}\n\nUser Question:\n{message}\n\nPlease answer the user's question, explaining machine learning concepts using the retrieved context when relevant. Do not expose internal IDs."
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="GEMINI_API_KEY is not configured.")
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        return {"reply": response.text}
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Chat failed: {str(exc)}")

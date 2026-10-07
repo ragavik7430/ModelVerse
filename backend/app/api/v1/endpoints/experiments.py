@@ -16,12 +16,16 @@ from app.ml import run_experiment
 from app.ml.algorithms import supported_recommendations
 from app.ml.trainer import validate_training_frame
 from app.models.dataset import Dataset
-from app.models.experiment import Experiment
+from app.models.experiment import Experiment, TrainedModel
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.experiment import ExperimentComparisonRead, ExperimentCreate, ExperimentRead
 from app.services.dataset_service import analyze_csv_file
 from app.services.storage import resolve_dataset_storage_path
+from app.ml.explainer import explain_model
+from app.agents.explanation_agent import generate_natural_language_explanation
+from app.services.rag_service import ingest_document
+from app.models.explanation import Explanation
 
 
 logger = logging.getLogger(__name__)
@@ -300,4 +304,100 @@ def compare_experiment_models(
         "comparison_policy": experiment.comparison_policy,
         "best_model_id": experiment.best_model_id,
         "candidates": experiment.models,
+    }
+
+
+@router.get("/experiments/{experiment_id}/models/{model_id}/explain")
+def explain_trained_model(
+    experiment_id: int,
+    model_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    experiment = _experiment_for_user(db, experiment_id, current_user)
+    project = db.query(Project).filter(Project.id == experiment.project_id).first()
+    model = db.query(TrainedModel).filter(
+        TrainedModel.id == model_id, TrainedModel.experiment_id == experiment_id
+    ).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    explanation = db.query(Explanation).filter(Explanation.model_id == model_id).first()
+    if explanation:
+        return {
+            "model_id": model_id,
+            "method": explanation.method,
+            "importances": explanation.feature_importances,
+            "natural_language_explanation": explanation.natural_language_explanation,
+            "limitations": explanation.limitations,
+            "status": explanation.status
+        }
+
+    dataset, experiment = db.query(Dataset, Experiment).filter(
+        Dataset.id == Experiment.dataset_id,
+        Experiment.id == experiment_id
+    ).first()
+
+    df, _ = _load_dataset_frame(dataset)
+    df = validate_training_frame(df, experiment, allow_identifier_target=True)
+    if experiment.target_column and experiment.target_column in df.columns:
+        X = df.drop(columns=[experiment.target_column])
+    else:
+        X = df
+
+    import mlflow.sklearn
+    if not model.mlflow_run_id:
+        raise HTTPException(status_code=404, detail="MLFlow model artifact not found")
+
+    model_uri = f"runs:/{model.mlflow_run_id}/model"
+    try:
+        mlflow_model = mlflow.sklearn.load_model(model_uri)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"MLFlow model could not be loaded: {exc}")
+
+    importances = explain_model(mlflow_model, X, model.algorithm)
+
+    method = "shap"
+    status_str = "completed"
+    if "error" in importances and importances["error"] == "unsupported":
+        method = "none"
+        status_str = "unsupported"
+        feature_importances = None
+    else:
+        feature_importances = importances
+
+    nl_exp, limitations = generate_natural_language_explanation(
+        model.algorithm,
+        experiment.problem_type,
+        feature_importances,
+        status_str
+    )
+
+    new_expl = Explanation(
+        model_id=model_id,
+        method=method,
+        feature_importances=feature_importances,
+        natural_language_explanation=nl_exp,
+        limitations=limitations,
+        status=status_str
+    )
+    db.add(new_expl)
+    db.commit()
+
+    if method != "none" and project.mode == "learning":
+        ingest_document(
+            project.id,
+            title=f"Explanation for {model.name} ({model.algorithm})",
+            text=nl_exp,
+            source_type="explanation",
+            metadata={"model_id": model_id}
+        )
+
+    return {
+        "model_id": model_id,
+        "method": method,
+        "importances": feature_importances,
+        "natural_language_explanation": nl_exp,
+        "limitations": limitations,
+        "status": status_str
     }

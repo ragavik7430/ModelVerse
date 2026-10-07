@@ -60,3 +60,4 @@ class TrainedModel(Base):
     )
 
     experiment = relationship("Experiment", back_populates="models")
+    explanation = relationship("Explanation", back_populates="model", uselist=False, cascade="all, delete-orphan")

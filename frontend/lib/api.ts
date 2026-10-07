@@ -372,3 +372,14 @@ export async function optimizeExperiment(experimentId: number): Promise<Experime
 export async function getExperimentComparison(experimentId: number): Promise<ExperimentComparison> {
   return apiRequest<ExperimentComparison>(`/experiments/${experimentId}/comparison`, { method: "GET" }, true);
 }
+
+export async function explainModel(modelId: number): Promise<{ model_id: number; experiment_id: number; algorithm: string; problem_type: string; status: string; explanation_method: string; feature_importance: Array<{feature: string; contribution: number; absolute_contribution: number; direction: "positive" | "negative" | "neutral"; metadata?: Record<string, unknown>}>; local_explanation: Array<{feature: string; contribution: number; absolute_contribution: number; direction: "positive" | "negative" | "neutral"; metadata?: Record<string, unknown>}> | null; base_value: number | null; prediction: number | null; explanation_summary: string; limitations: string[]; generated_at: string; }> {
+  return apiRequest<{ model_id: number; experiment_id: number; algorithm: string; problem_type: string; status: string; explanation_method: string; feature_importance: Array<{feature: string; contribution: number; absolute_contribution: number; direction: "positive" | "negative" | "neutral"; metadata?: Record<string, unknown>}>; local_explanation: Array<{feature: string; contribution: number; absolute_contribution: number; direction: "positive" | "negative" | "neutral"; metadata?: Record<string, unknown>}> | null; base_value: number | null; prediction: number | null; explanation_summary: string; limitations: string[]; generated_at: string; }>(`/models/${modelId}/explain`, { method: "GET" }, true);
+}
+
+export async function sendChatMessage(projectId: number, message: string): Promise<{ reply: string }> {
+  return apiRequest<{ reply: string }>(`/projects/${projectId}/chat`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  }, true);
+}
